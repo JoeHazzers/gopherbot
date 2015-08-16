@@ -2,31 +2,32 @@ package event
 
 import "sync"
 
-// EventType distinguishes events from oneanother.
+// Type distinguishes Events from oneanother.
 type Type int
 
-// Event is an event passed fired through an EventBus and handled by
-// EventHandlers./
+// Event is an event passed fired through a Bus and handled by
+// Handlers.
 type Event struct {
 	Type    Type
 	Payload interface{}
 }
 
+// HandleFunc is a func which receives Events.
 type HandleFunc func(Event)
 
-// EventHandler is a func which consumes an Event.
+// Handler is a func which consumes an Event.
 type Handler struct {
 	Name string
 	Fun  HandleFunc
 }
 
-// EventBus dispatches fired Events to registered handlers for that EventType.
+// Bus dispatches fired Events to registered handlers for that Type.
 type Bus struct {
 	sync.RWMutex
 	Handlers map[Type][]Handler
 }
 
-// NewEventBus creates a new EventBus.
+// NewBus creates a new Bus.
 func NewBus() *Bus {
 	bus := Bus{
 		Handlers: make(map[Type][]Handler, 0),
@@ -34,12 +35,6 @@ func NewBus() *Bus {
 
 	return &bus
 }
-
-type ByName []Handler
-
-func (n ByName) Len() int           { return len(n) }
-func (n ByName) Swap(i, j int)      { n[i], n[j] = n[j], n[i] }
-func (n ByName) Less(i, j int) bool { return n[i].Name < n[j].Name }
 
 // AddHandler registers an EventHandler with the EventBus to handle Events of
 // EventType t.
