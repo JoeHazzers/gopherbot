@@ -17,8 +17,8 @@ type HandleFunc func(Event)
 
 // Handler is a func which consumes an Event.
 type Handler struct {
-	Name string
-	Fun  HandleFunc
+	Id       string
+	Callback HandleFunc
 }
 
 // Bus dispatches fired Events to registered handlers for that Type.
@@ -52,7 +52,7 @@ func (bus *Bus) AddHandler(t Type, h Handler) {
 
 // DeleteHandler unregisters an EventHandler from the EventBus so that it
 // no longer handles Events of EventType t
-func (bus *Bus) DeleteHandler(t Type, name string) {
+func (bus *Bus) DeleteHandler(t Type, id string) {
 	bus.Lock()
 	defer bus.Unlock()
 
@@ -63,14 +63,11 @@ func (bus *Bus) DeleteHandler(t Type, name string) {
 	}
 
 	for i := 0; i < len(handlers); i++ {
-		if handlers[i].Name == name {
+		if handlers[i].Id == id {
 			// Delete without preserving order
 			handlers[i] = handlers[len(handlers)-1]
 			handlers[len(handlers)-1] = Handler{}
 			handlers = handlers[:len(handlers)-1]
-
-			// we've removed an element, so we're closer to the end
-			i++
 		}
 	}
 
@@ -80,6 +77,9 @@ func (bus *Bus) DeleteHandler(t Type, name string) {
 // Fire sends an Event through an EventBus to all registered handlers for the
 // EventType of the Event given.
 func (bus *Bus) Fire(e Event) {
+	bus.RLock()
+	defer bus.RUnlock()
+
 	handlers, ok := bus.Handlers[e.Type]
 	if !ok {
 		return
@@ -89,7 +89,10 @@ func (bus *Bus) Fire(e Event) {
 
 	wg.Add(len(handlers))
 	for _, handler := range handlers {
-		go handler.Fun(e)
+		go func(h Handler, e Event) {
+			defer wg.Done()
+			h.Callback(e)
+		}(handler, e)
 	}
 	wg.Wait()
 }

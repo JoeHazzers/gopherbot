@@ -23,7 +23,7 @@ func testMakeAckHandler() (HandleFunc, <-chan Event) {
 
 // testEmptyHandler is an empty HandleFunc which does nothing. Useful when
 // testing other components of the Bus.
-func testEmptyHandler(e Event) {
+func testEmptyHandleFunc(e Event) {
 	return
 }
 
@@ -35,8 +35,8 @@ func testMakeHandlers(n int, f HandleFunc) []Handler {
 	handlers := make([]Handler, n)
 	for i := range handlers {
 		handlers[i] = Handler{
-			Name: strconv.Itoa(i),
-			Fun:  f,
+			Id:       strconv.Itoa(i),
+			Callback: f,
 		}
 	}
 
@@ -49,11 +49,11 @@ func testHandlerDiff(a []Handler, b []Handler) []string {
 	names := make(map[string]struct{})
 
 	for _, handler := range a {
-		names[handler.Name] = struct{}{}
+		names[handler.Id] = struct{}{}
 	}
 
 	for _, handler := range b {
-		delete(names, handler.Name)
+		delete(names, handler.Id)
 	}
 
 	if len(names) == 0 {
@@ -85,7 +85,7 @@ func TestNewBus(t *testing.T) {
 // are stored in the correct slice within the Bus.
 func TestAddHandler(t *testing.T) {
 	bus := NewBus()
-	handlers := testMakeHandlers(testNumHandlers, testEmptyHandler)
+	handlers := testMakeHandlers(testNumHandlers, testEmptyHandleFunc)
 
 	for _, handler := range handlers {
 		bus.AddHandler(testEventType, handler)
@@ -107,7 +107,7 @@ func TestAddHandler(t *testing.T) {
 // is removed correctly from the Bus.
 func TestDeleteHandler(t *testing.T) {
 	bus := NewBus()
-	handlers := testMakeHandlers(testNumHandlers, testEmptyHandler)
+	handlers := testMakeHandlers(testNumHandlers, testEmptyHandleFunc)
 
 	// Add all generated handlers to the bus
 	for _, handler := range handlers {
@@ -119,7 +119,7 @@ func TestDeleteHandler(t *testing.T) {
 	// Delete every 5th handler
 	for i, h := range handlers {
 		if i%5 == 0 {
-			bus.DeleteHandler(testEventType, h.Name)
+			bus.DeleteHandler(testEventType, h.Id)
 		} else {
 			// If it's not a 5th handler, we're expecting it back at the end
 			expectedHandlers = append(expectedHandlers, h)
@@ -153,8 +153,8 @@ func TestFire(t *testing.T) {
 		chans[i] = c
 
 		handler := Handler{
-			Name: strconv.Itoa(i),
-			Fun:  fun,
+			Id:       strconv.Itoa(i),
+			Callback: fun,
 		}
 		bus.AddHandler(testEventType, handler)
 	}
@@ -176,5 +176,25 @@ func TestFire(t *testing.T) {
 		if res != event {
 			t.Errorf("Incorrect event received on chan %d. Expected %+v, got %+v", i, event, res)
 		}
+	}
+}
+
+func BenchmarkFire(b *testing.B) {
+	bus := NewBus()
+	handler := Handler{
+		Id:       "test",
+		Callback: testEmptyHandleFunc,
+	}
+	bus.AddHandler(testEventType, handler)
+
+	event := Event{
+		Type:    testEventType,
+		Payload: nil,
+	}
+
+	b.ResetTimer()
+
+	for i := 0; i < b.N; i++ {
+		bus.Fire(event)
 	}
 }
