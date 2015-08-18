@@ -1,98 +1,138 @@
 package event
 
-import "sync"
+import (
+	"fmt"
+	"reflect"
+	"sync"
+)
 
-// Type distinguishes Events from oneanother.
-type Type int
-
-// Event is an event passed fired through a Bus and handled by
-// Handlers.
-type Event struct {
-	Type    Type
-	Payload interface{}
-}
-
-// HandleFunc is a func which receives Events.
-type HandleFunc func(Event)
-
-// Handler is a func which consumes an Event.
-type Handler struct {
-	Id       string
-	Callback HandleFunc
-}
-
-// Bus dispatches fired Events to registered handlers for that Type.
 type Bus struct {
 	sync.RWMutex
-	Handlers map[Type][]Handler
+	callbacks map[string][]reflect.Value
 }
 
-// NewBus creates a new Bus.
 func NewBus() *Bus {
 	bus := Bus{
-		Handlers: make(map[Type][]Handler, 0),
+		callbacks: make(map[string][]reflect.Value),
 	}
 
 	return &bus
 }
 
-// AddHandler registers an EventHandler with the EventBus to handle Events of
-// EventType t.
-func (bus *Bus) AddHandler(t Type, h Handler) {
+func (bus *Bus) Add(t string, f interface{}) error {
+	err := validateCallback(f)
+	if err != nil {
+		return err
+	}
+
 	bus.Lock()
 	defer bus.Unlock()
 
-	handlers, ok := bus.Handlers[t]
+	callbacks, ok := bus.callbacks[t]
 	if !ok {
-		handlers = make([]Handler, 0)
+		callbacks = make([]reflect.Value, 0)
 	}
 
-	bus.Handlers[t] = append(handlers, h)
+	bus.callbacks[t] = append(callbacks, reflect.ValueOf(f))
+
+	return nil
 }
 
-// DeleteHandler unregisters an EventHandler from the EventBus so that it
-// no longer handles Events of EventType t
-func (bus *Bus) DeleteHandler(t Type, id string) {
+func (bus *Bus) Delete(topic string, callback interface{}) (bool, error) {
 	bus.Lock()
 	defer bus.Unlock()
-
-	handlers, ok := bus.Handlers[t]
-
-	if !ok {
-		return
-	}
-
-	for i := 0; i < len(handlers); i++ {
-		if handlers[i].Id == id {
-			// Delete without preserving order
-			handlers[i] = handlers[len(handlers)-1]
-			handlers[len(handlers)-1] = Handler{}
-			handlers = handlers[:len(handlers)-1]
-		}
-	}
-
-	bus.Handlers[t] = handlers
+	return bus.del(topic, callback, false)
 }
 
-// Fire sends an Event through an EventBus to all registered handlers for the
-// EventType of the Event given.
-func (bus *Bus) Fire(e Event) {
+func (bus *Bus) DeleteAll(topic string, callback interface{}) (bool, error) {
+	bus.Lock()
+	defer bus.Unlock()
+	return bus.del(topic, callback, true)
+}
+
+func (bus *Bus) Fire(t string, args ...interface{}) {
 	bus.RLock()
 	defer bus.RUnlock()
 
-	handlers, ok := bus.Handlers[e.Type]
-	if !ok {
+	if _, ok := bus.callbacks[t]; !ok {
 		return
+	}
+
+	argVals := make([]reflect.Value, len(args))
+
+	for i := 0; i < len(args); i++ {
+		argVals[i] = reflect.ValueOf(args[i])
 	}
 
 	var wg sync.WaitGroup
 
-	wg.Add(len(handlers))
-	for _, handler := range handlers {
-		go func(h Handler, e Event) {
+	for _, c := range bus.callbacks[t] {
+		wg.Add(1)
+		go func(c reflect.Value) {
 			defer wg.Done()
-			h.Callback(e)
-		}(handler, e)
+			c.Call(argVals)
+		}(c)
 	}
+
 	wg.Wait()
+}
+
+func (bus *Bus) Purge(callback interface{}) (bool, error) {
+	bus.Lock()
+	defer bus.Unlock()
+
+	found := false
+	for topic := range bus.callbacks {
+		del, err := bus.del(topic, callback, true)
+		if del {
+			found = true
+		}
+		if err != nil {
+			return found, err
+		}
+	}
+	return found, nil
+}
+
+func (bus *Bus) Reset() {
+	bus.callbacks = make(map[string][]reflect.Value)
+}
+
+func (bus *Bus) del(t string, f interface{}, all bool) (bool, error) {
+	err := validateCallback(f)
+	if err != nil {
+		return false, err
+	}
+
+	if _, ok := bus.callbacks[t]; !ok {
+		return false, nil
+	}
+
+	v := reflect.ValueOf(f)
+
+	found := false
+
+	for i := 0; i < len(bus.callbacks[t]); i++ {
+		if bus.callbacks[t][i] == v {
+			bus.callbacks[t] = append(bus.callbacks[t][:i], bus.callbacks[t][i+1:]...)
+			found = true
+			if !all {
+				break
+			}
+		}
+	}
+
+	if len(bus.callbacks[t]) == 0 {
+		delete(bus.callbacks, t)
+	}
+
+	return found, nil
+}
+
+func validateCallback(f interface{}) error {
+	if reflect.TypeOf(f).Kind() != reflect.Func {
+		return fmt.Errorf("Provided callback is not a func")
+	}
+
+	return nil
 }
