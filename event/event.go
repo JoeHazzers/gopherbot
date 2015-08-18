@@ -6,11 +6,14 @@ import (
 	"sync"
 )
 
+// Bus is used to fire events to various callbacks which subscribe to various
+// topics
 type Bus struct {
 	sync.RWMutex
 	callbacks map[string][]reflect.Value
 }
 
+// NewBus creates a new Bus, ready to accept and process fired events
 func NewBus() *Bus {
 	bus := Bus{
 		callbacks: make(map[string][]reflect.Value),
@@ -19,6 +22,8 @@ func NewBus() *Bus {
 	return &bus
 }
 
+// Add registers a callback with the Bus to receive events of the provided
+// topic
 func (bus *Bus) Add(t string, f interface{}) error {
 	err := validateCallback(f)
 	if err != nil {
@@ -38,18 +43,27 @@ func (bus *Bus) Add(t string, f interface{}) error {
 	return nil
 }
 
+// Delete removes the first encountered instance of a callback from the
+// provided topic. This method will return true if the provided callback was
+// found and deleted, false otherwise. An error will be returned when the
+// provided callback is invalid.
 func (bus *Bus) Delete(topic string, callback interface{}) (bool, error) {
 	bus.Lock()
 	defer bus.Unlock()
 	return bus.del(topic, callback, false)
 }
 
+// DeleteAll removes all instances of a callback from the provided topic. See
+// Delete() for return values.
 func (bus *Bus) DeleteAll(topic string, callback interface{}) (bool, error) {
 	bus.Lock()
 	defer bus.Unlock()
 	return bus.del(topic, callback, true)
 }
 
+// Fire will call all registered callbacks for the provided topic with the
+// provided arguments. A call to this method will block until all registered
+// callbacks have returned.
 func (bus *Bus) Fire(t string, args ...interface{}) {
 	bus.RLock()
 	defer bus.RUnlock()
@@ -77,6 +91,8 @@ func (bus *Bus) Fire(t string, args ...interface{}) {
 	wg.Wait()
 }
 
+// Purge will remove all instances of the provided callback from all existing
+// topics. See Delete() for return values.
 func (bus *Bus) Purge(callback interface{}) (bool, error) {
 	bus.Lock()
 	defer bus.Unlock()
@@ -94,7 +110,10 @@ func (bus *Bus) Purge(callback interface{}) (bool, error) {
 	return found, nil
 }
 
+// Reset removes all registered callbacks and topics from the Bus.
 func (bus *Bus) Reset() {
+	bus.Lock()
+	defer bus.Unlock()
 	bus.callbacks = make(map[string][]reflect.Value)
 }
 
