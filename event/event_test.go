@@ -19,6 +19,17 @@ func testCallbackEmptyTwo() {
 	return
 }
 
+func testNewAckCallback(c chan<- []reflect.Value) func(...interface{}) {
+	return func(args ...interface{}) {
+		argVals := make([]reflect.Value, len(args))
+		for i := range argVals {
+			argVals[i] = reflect.ValueOf(args[i])
+		}
+
+		c <- argVals
+	}
+}
+
 func TestAddInvalid(t *testing.T) {
 	bus := NewBus()
 
@@ -114,4 +125,43 @@ func TestDelete(t *testing.T) {
 			}
 		}
 	}
+}
+
+func TestFire(t *testing.T) {
+	bus := NewBus()
+	chans := make([]chan []reflect.Value, testNumCallbacks)
+
+	for i := range chans {
+		chans[i] = make(chan []reflect.Value)
+		callback := testNewAckCallback(chans[i])
+		bus.Add("test", callback)
+	}
+
+	args := []interface{}{1, "test", false}
+	argVals := make([]reflect.Value, len(args))
+	for i := range argVals {
+		argVals[i] = reflect.ValueOf(args[i])
+	}
+
+	done := make(chan struct{})
+	go func() {
+		bus.Fire("test", args...)
+		close(done)
+	}()
+
+	for _, c := range chans {
+		res := <-c
+
+		if len(res) != len(argVals) {
+			t.Errorf("Expected %d args, got %d.", len(argVals), len(res))
+		}
+
+		for i := range argVals {
+			if argVals[i] != res[i] {
+				t.Errorf("Arg %d does match. Expected %+v, got %+v", i, argVals[i], res[i])
+			}
+		}
+	}
+
+	<-done
 }
